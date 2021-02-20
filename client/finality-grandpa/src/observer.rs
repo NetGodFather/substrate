@@ -1,6 +1,6 @@
 // This file is part of Substrate.
 
-// Copyright (C) 2018-2020 Parity Technologies (UK) Ltd.
+// Copyright (C) 2018-2021 Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: GPL-3.0-or-later WITH Classpath-exception-2.0
 
 // This program is free software: you can redistribute it and/or modify
@@ -39,7 +39,6 @@ use crate::{
 };
 use crate::authorities::SharedAuthoritySet;
 use crate::communication::{Network as NetworkT, NetworkBridge};
-use crate::consensus_changes::SharedConsensusChanges;
 use crate::notification::GrandpaJustificationSender;
 use sp_finality_grandpa::AuthorityId;
 use std::marker::{PhantomData, Unpin};
@@ -58,17 +57,11 @@ impl<'a, Block, Client> finality_grandpa::Chain<Block::Hash, NumberFor<Block>>
 	fn ancestry(&self, base: Block::Hash, block: Block::Hash) -> Result<Vec<Block::Hash>, GrandpaError> {
 		environment::ancestry(&self.client, base, block)
 	}
-
-	fn best_chain_containing(&self, _block: Block::Hash) -> Option<(Block::Hash, NumberFor<Block>)> {
-		// only used by voter
-		None
-	}
 }
 
 fn grandpa_observer<BE, Block: BlockT, Client, S, F>(
 	client: &Arc<Client>,
 	authority_set: &SharedAuthoritySet<Block::Hash, NumberFor<Block>>,
-	consensus_changes: &SharedConsensusChanges<Block::Hash, NumberFor<Block>>,
 	voters: &Arc<VoterSet<AuthorityId>>,
 	justification_sender: &Option<GrandpaJustificationSender<Block>>,
 	last_finalized_number: NumberFor<Block>,
@@ -83,7 +76,6 @@ where
 	Client: crate::ClientForGrandpa<Block, BE>,
 {
 	let authority_set = authority_set.clone();
-	let consensus_changes = consensus_changes.clone();
 	let client = client.clone();
 	let voters = voters.clone();
 	let justification_sender = justification_sender.clone();
@@ -123,7 +115,6 @@ where
 			match environment::finalize_block(
 				client.clone(),
 				&authority_set,
-				&consensus_changes,
 				None,
 				finalized_hash,
 				finalized_number,
@@ -293,7 +284,6 @@ where
 		let observer = grandpa_observer(
 			&self.client,
 			&self.persistent_data.authority_set,
-			&self.persistent_data.consensus_changes,
 			&voters,
 			&self.justification_sender,
 			last_finalized_number,

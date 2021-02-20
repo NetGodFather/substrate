@@ -1,6 +1,6 @@
 // This file is part of Substrate.
 
-// Copyright (C) 2019-2020 Parity Technologies (UK) Ltd.
+// Copyright (C) 2019-2021 Parity Technologies (UK) Ltd.
 // SPDX-License-Identifier: Apache-2.0
 
 // Licensed under the Apache License, Version 2.0 (the "License");
@@ -28,13 +28,13 @@ pub use sp_externalities::{Externalities, ExternalitiesExt};
 /// Code execution engine.
 pub trait CodeExecutor: Sized + Send + Sync + CallInWasm + Clone + 'static {
 	/// Externalities error type.
-	type Error: Display + Debug + Send + 'static;
+	type Error: Display + Debug + Send + Sync + 'static;
 
 	/// Call a given method in the runtime. Returns a tuple of the result (either the output data
 	/// or an execution error) together with a `bool`, which is true if native execution was used.
 	fn call<
 		R: codec::Codec + PartialEq,
-		NC: FnOnce() -> Result<R, String> + UnwindSafe,
+		NC: FnOnce() -> Result<R, Box<dyn std::error::Error + Send + Sync>> + UnwindSafe,
 	>(
 		&self,
 		ext: &mut dyn Externalities,
@@ -186,7 +186,26 @@ impl TaskExecutorExt {
 	}
 }
 
-/// Something that can spawn futures (blocking and non-blocking) with an assigned name.
+/// Runtime spawn extension.
+pub trait RuntimeSpawn: Send {
+	/// Create new runtime instance and use dynamic dispatch to invoke with specified payload.
+	///
+	/// Returns handle of the spawned task.
+	///
+	/// Function pointers (`dispatcher_ref`, `func`) are WASM pointer types.
+	fn spawn_call(&self, dispatcher_ref: u32, func: u32, payload: Vec<u8>) -> u64;
+
+	/// Join the result of previously created runtime instance invocation.
+	fn join(&self, handle: u64) -> Vec<u8>;
+}
+
+#[cfg(feature = "std")]
+sp_externalities::decl_extension! {
+	/// Extension that supports spawning extra runtime instances in externalities.
+	pub struct RuntimeSpawnExt(Box<dyn RuntimeSpawn>);
+}
+
+/// Something that can spawn tasks (blocking and non-blocking) with an assigned name.
 #[dyn_clonable::clonable]
 pub trait SpawnNamed: Clone + Send + Sync {
 	/// Spawn the given blocking future.
@@ -206,5 +225,30 @@ impl SpawnNamed for Box<dyn SpawnNamed> {
 
 	fn spawn(&self, name: &'static str, future: futures::future::BoxFuture<'static, ()>) {
 		(**self).spawn(name, future)
+	}
+}
+
+/// Something that can spawn essential tasks (blocking and non-blocking) with an assigned name.
+///
+/// Essential tasks are special tasks that should take down the node when they end.
+#[dyn_clonable::clonable]
+pub trait SpawnEssentialNamed: Clone + Send + Sync {
+	/// Spawn the given blocking future.
+	///
+	/// The given `name` is used to identify the future in tracing.
+	fn spawn_essential_blocking(&self, name: &'static str, future: futures::future::BoxFuture<'static, ()>);
+	/// Spawn the given non-blocking future.
+	///
+	/// The given `name` is used to identify the future in tracing.
+	fn spawn_essential(&self, name: &'static str, future: futures::future::BoxFuture<'static, ()>);
+}
+
+impl SpawnEssentialNamed for Box<dyn SpawnEssentialNamed> {
+	fn spawn_essential_blocking(&self, name: &'static str, future: futures::future::BoxFuture<'static, ()>) {
+		(**self).spawn_essential_blocking(name, future)
+	}
+
+	fn spawn_essential(&self, name: &'static str, future: futures::future::BoxFuture<'static, ()>) {
+		(**self).spawn_essential(name, future)
 	}
 }
